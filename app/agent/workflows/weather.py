@@ -72,7 +72,7 @@ def result_node(state: AgentState) -> dict:
     temperature = state["process_data"].get("temperature")
     humidity = state["process_data"].get("humidity")
     return {
-        "result": f"城市：{city} - 温度：{temperature} - 湿度：{humidity}"
+        "result": f"**城市**：{city}\n**温度**：{temperature}\n**湿度**：{humidity}"
     }
 
 
