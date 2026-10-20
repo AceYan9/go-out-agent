@@ -1,96 +1,72 @@
 # @Time: 2026/10/19 16:10
 # @Author: yanggan
 
-from typing import TypedDict, NotRequired, Any
+from typing import Literal
 
 from langgraph.graph import StateGraph, START, END
+from pydantic import BaseModel
 
-from app.agent.tools.location import get_location
-from app.agent.tools.weather import get_weather
 from app.llm import llm
-
-from app.agent.workflows import weather_workflow
-
-
-class WeatherState(TypedDict):
-    user_input: str
-    city: str
-    latitude: NotRequired[float]
-    longitude: NotRequired[float]
-    temperature: NotRequired[float]
-    humidity: NotRequired[float]
-    error: NotRequired[str]
-    result: NotRequired[dict[str, Any]]
+from app.agent.workflows.common import AgentState
+from app.agent.workflows import weather_workflow, requirement_workflow
 
 
-def extract_city_node(state: WeatherState):
-    response = llm.invoke(
-        f"从以下文本中提取城市名称，只返回城市名：{state['user_input']}"
+class IntentResult(BaseModel):
+    intent: Literal["requirement", "weather", "unknown"]
+
+
+intent_llm = llm.with_structured_output(
+    IntentResult,
+    method="function_calling",
+)
+
+
+def classify_intent_node(state: AgentState):
+    result = intent_llm.invoke(
+        f"""
+        判断用户输入属于哪种意图。
+
+        requirement：用户希望分析、设计、拆解或规划一个软件需求。
+        weather：用户表达了要查询天气或者去某个地方，并且提供了可识别的城市。
+        unknown：不属于以上两种，或者无法明确判断。
+
+        用户输入：{state["user_input"]}
+        """
     )
 
-    return {"city": response.content.strip()}
+    return {"intent": result.intent}
 
 
-def coordinates_node(state: WeatherState) -> dict:
-    try:
-        longitude, latitude = get_location.invoke({"city": state["city"]})
-        if not latitude or not longitude:
-            return {"error": "未能获取有效的城市经纬度"}
-
-        return {
-            "latitude": latitude,
-            "longitude": longitude,
-        }
-    except Exception as e:
-        return {"error": f"获取经纬度失败：{str(e)}"}
+def route_by_intent(state: AgentState):
+    return state["intent"]
 
 
-def check_coordinates(state: WeatherState) -> str:
-    if state.get("error"):
-        return "end"
-
-    return "weather"
+def fallback_node(state: AgentState):
+    return {"result": "暂时无法理解，请重新描述。"}
 
 
-def weather_node(state: WeatherState) -> dict:
-    try:
-        data = get_weather.invoke({
-            "latitude": state["latitude"],
-            "longitude": state["longitude"],
-        })
+builder = StateGraph(AgentState)
 
-        temperature = data.get("temperature")
-        humidity = data.get("humidity")
-
-        if temperature is None or humidity is None:
-            return {"error": "天气接口未返回有效的温度或湿度"}
-
-        return {
-            "temperature": temperature,
-            "humidity": humidity,
-        }
-
-    except Exception as exc:
-        return {"error": f"获取天气失败：{exc}"}
-
-
-def result_node(state: WeatherState) -> dict:
-    return {
-        "result": {
-            "city": state["city"],
-            "temperature": state["temperature"],
-            "humidity": state["humidity"],
-        }
-    }
-
-
-builder = StateGraph(WeatherState)
-
+builder.add_node("classify_intent", classify_intent_node)
 builder.add_node("weather", weather_workflow)
+builder.add_node("requirement", requirement_workflow)
+builder.add_node("fallback", fallback_node)
 
-builder.add_edge(START, "weather")
+builder.add_edge(START, "classify_intent")
+
+builder.add_conditional_edges(
+    "classify_intent",
+    route_by_intent,
+    {
+        "requirement": "requirement",
+        "weather": "weather",
+        "unknown": "fallback",
+    },
+)
 
 builder.add_edge("weather", END)
+builder.add_edge("requirement", END)
+builder.add_edge("fallback", END)
 
 # 编译
 workflow = builder.compile()
