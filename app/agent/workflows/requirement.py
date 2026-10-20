@@ -85,9 +85,9 @@ def calc_working_hours(state: AgentState):
         f"""
         帮我把任务判断一下实现难易程度，分三个等级，easy、medium、difficult
         判断完成后帮我计算总工时，按照下面的计算方式：
-        easy      -  4小时
-        medium    -  8小时
-        difficult -  16小时
+        easy      -  2小时
+        medium    -  4小时
+        difficult -  8小时
         最后给我加总的小时数即可，结果只要返回一个数字
         当前任务拆分：{current_task}
         """
@@ -99,14 +99,13 @@ def calc_working_hours(state: AgentState):
     }
 
 
-# todo 整理结果
+# 整理结果
 def result_node(state: AgentState):
+    requirement = state["process_data"]["current_requirement"]
+    task = state["process_data"]["task"]
+    working_hours = state["process_data"]["working_hours"]
     return {
-        "result": {
-            "requirement": state["process_data"]["current_requirement"],
-            "task": state["process_data"]["task"],
-            "working_hours": state["process_data"]["working_hours"]
-        }
+        "result": f"{requirement}\n\n{task}\n\n预估总工时：{working_hours}小时"
     }
 
 
